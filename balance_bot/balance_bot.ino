@@ -1,18 +1,22 @@
+// Author: Bryson Hunsaker
 #include <Wire.h>
 #include <MPU6050.h>
 
-MPU6050 mpu;
+// Multiple for tuning how long motors should actuate for a given gyro deflection
+const double PROPORTIONAL_GAIN = 2;
+// Multiple on integral of error - set to 0 to have this act as a simple P controller
+const double INTEGRAL_GAIN = 0.001;
+// Logic pins
+const int MOTOR_L1 = 2;
+const int MOTOR_L2 = 3;
+const int MOTOR_R1 = 4;
+const int MOTOR_R2 = 5;
 
-// X Value for accel on a stable surface
-double OFFSET = -1;
-// Multiple for tuning how long motors should actuate for a given accel
-double DELAY_FACTOR = 3;
-int MOTOR_L1 = 2;
-int MOTOR_L2 = 3;
-int MOTOR_R1 = 4;
-int MOTOR_R2 = 5;
-int ENABLE_L = 10;
-int ENABLE_R = 11;
+MPU6050 mpu;
+double integral = 0.0;
+bool debug = 0;
+double exec_time = 0;
+
 
 void setup() {
   Serial.begin(115200);
@@ -22,17 +26,19 @@ void setup() {
   while(!mpu.begin(MPU6050_SCALE_2000DPS, MPU6050_RANGE_2G))
   {
     Serial.println("Could not find a valid MPU6050 sensor, check wiring!");
-    delay(500);
+    delay(200);
   }
+  
+  // Calibrate gyroscope
+  mpu.calibrateGyro();
 
-  //mpu.setAccelOffsetX(-2.25);
+  // Set threshold sensitivity
+  mpu.setThreshold(1);
     
   pinMode(MOTOR_L1,OUTPUT);
   pinMode(MOTOR_L2,OUTPUT);
   pinMode(MOTOR_R1,OUTPUT);
   pinMode(MOTOR_R2,OUTPUT);
-  pinMode(ENABLE_L,OUTPUT);
-  pinMode(ENABLE_R,OUTPUT);
 }
 
 
@@ -41,8 +47,6 @@ void forward() {
   digitalWrite(MOTOR_R2, LOW);
   digitalWrite(MOTOR_L1, HIGH);
   digitalWrite(MOTOR_L2, LOW);
-  analogWrite(ENABLE_R, 250);
-  analogWrite(ENABLE_L, 250);
 }
 
 void reverse() {
@@ -50,13 +54,9 @@ void reverse() {
   digitalWrite(MOTOR_R2, HIGH);
   digitalWrite(MOTOR_L1, LOW);
   digitalWrite(MOTOR_L2, HIGH);
-  analogWrite(ENABLE_R, 250);
-  analogWrite(ENABLE_L, 250);
 }
 
 void stop () {
-  analogWrite(ENABLE_R, 0);
-  analogWrite(ENABLE_L, 0);
   digitalWrite(MOTOR_R1, LOW);
   digitalWrite(MOTOR_R2, LOW);
   digitalWrite(MOTOR_L1, LOW);
@@ -64,13 +64,32 @@ void stop () {
 }
 
 void loop() {
-  Vector normAccel = mpu.readNormalizeAccel();
-  Serial.println(normAccel.XAxis);
-  if(normAccel.XAxis < OFFSET) {
-    //forward();
-  } else if (normAccel.XAxis > OFFSET) {
-    //reverse();
+  // For measuring elapsed time
+  long int t0 = 0;
+  long int t1 = 0;
+  t0 = micros();
+
+  // Read Gyro
+  Vector normGyro = mpu.readNormalizeGyro();
+    
+  //debug loop to prevent stop exec
+  while(debug){}
+  
+  //Serial.println(normGyro.XAxis);
+  if(normGyro.XAxis < 0) {
+    forward();
+  } else if (normGyro.XAxis > 0) {
+    reverse();
+  } else {
+    stop();
   }
-  // Proportionality of response will come from delay
-  delay((abs(normAccel.XAxis - OFFSET)) * DELAY_FACTOR);
+  
+  // Approximation of integral of error wrt time
+  integral += (abs(normGyro.XAxis)) * exec_time;
+  // PI control
+  double correction = ((abs(normGyro.XAxis)) * PROPORTIONAL_GAIN) + (integral * INTEGRAL_GAIN);
+  delay(correction);
+  
+  t1 = micros();
+  exec_time = (t1-t0) / 1000;
 }
